@@ -1,55 +1,52 @@
 {
-  "paper_trading": true,
-  "auto_trade": false,
-  "min_profit_margin": 0.03,
-  "safety_margin": 0.05,
-  "max_position_per_market": 100.0,
-  "max_total_exposure": 500.0,
-  "max_slippage": 0.02,
-  "min_liquidity": 10.0,
-  "check_interval_seconds": 10,
-  "database_path": "arb_bot.sqlite3",
-  "jsonl_dir": "logs",
+  "scan_interval_seconds": 60,
+  "target_total_cost_threshold": 0.9,
+  "markets": {
+    "sport": "soccer",
+    "competition": "World Cup"
+  },
   "notifications": {
     "console": true,
     "webhook_url": ""
   },
+  "risk_flags": {
+    "allow_partial_coverage_alert": true,
+    "flag_42_excludes_4_4": true
+  },
+  "data_dir": "data",
+  "use_mock_data": false,
   "polymarket": {
-    "api_base": "https://clob.polymarket.com",
-    "chain_id": 137,
-    "private_key": "",
-    "funder_address": "",
-    "signature_type": 0
+    "api_base_url": "https://gamma-api.polymarket.com",
+    "clob_base_url": "https://clob.polymarket.com"
   },
   "forty_two": {
-    "api_base": "",
-    "username": "",
-    "password": "",
-    "cookie": "",
-    "headless": true,
-    "browser_profile": ""
+    "api_base_url": "https://rest.ft.42.space"
   },
-  "event_mappings": [
-    {
-      "event_name": "France vs Senegal",
-      "polymarket_market_id": "poly-france-senegal",
-      "polymarket_outcome_yes": "France YES",
-      "polymarket_outcome_no": "France NO",
-      "forty_two_market_id": "42-france-senegal-exact-score",
-      "forty_two_market_type": "exact_score",
-      "target_outcome": "France Win",
-      "settlement_definition": "90 minutes only",
-      "polymarket_settlement_definition": "90 minutes only",
-      "forty_two_settlement_definition": "90 minutes only",
-      "settlement_time": "2026-06-20T20:00:00Z",
-      "polymarket_settlement_time": "2026-06-20T20:00:00Z",
-      "forty_two_settlement_time": "2026-06-20T20:00:00Z",
-      "exact_score_mapping": {
-        "target_scores": ["1-0", "2-0", "2-1", "3-0", "3-1", "3-2"],
-        "excluded_buckets": [],
-        "is_complete_target_coverage": true,
-        "quick_select_text": "FRA wins the match"
-      }
-    }
-  ]
+  "team_aliases": {
+    "France": "FRA",
+    "Senegal": "SEN",
+    "Brazil": "BRA",
+    "Germany": "GER",
+    "England": "ENG",
+    "Argentina": "ARG",
+    "Spain": "ESP",
+    "Portugal": "POR",
+    "United States": "USA",
+    "Netherlands": "NED",
+    "Japan": "JPN",
+    "Sweden": "SWE",
+    "Tunisia": "TUN",
+    "Norway": "NOR",
+    "Iraq": "IRQ",
+    "Scotland": "SCO",
+    "Morocco": "MAR",
+    "Haiti": "HTI",
+    "Australia": "AUS",
+    "Turkey": "TUR",
+    "Paraguay": "PAR",
+    "Canada": "CAN",
+    "Switzerland": "SUI",
+    "Qatar": "QAT",
+    "Bosnia and Herzegovina": "BIH"
+  }
 }
