@@ -1,131 +1,201 @@
-# 42 + Polymarket Cross-Platform Hedge Arbitrage Bot
+# World Cup Arbitrage Monitor
 
-Python implementation for monitoring the same sports/event exposure on 42 and Polymarket. It converts all odds into implied probability / buy cost, treats Polymarket as the liquid reference market, and looks for cases where a 42 target basket plus the Polymarket opposite side costs less than `1 - min_profit_margin`.
+Python monitor for World Cup prediction markets on 42.space and Polymarket.
+Version 1 is alert-only: it does not trade, does not connect wallets, and does not store private keys or cookies.
 
-Default mode is safe:
+## Logic
 
-- `paper_trading=true`
-- `auto_trade=false`
-- live order methods are adapter boundaries, not silently wired
-- if settlement rules differ, or 42 redeem tax is unavailable, the bot emits `ALERT_ONLY`
+42 is normalized into three costs:
 
-## Directory Structure
+- `42_team_win_cost`
+- `42_team_draw_cost`
+- `42_team_lost_cost`
+
+Polymarket is normalized into:
+
+- `polymarket_team_yes_cost`
+- `polymarket_team_no_cost`
+
+The monitor emits an alert only when both conditions pass:
 
 ```text
-forty_two_polymarket_arb/
-  arb_bot/
-    adapters/
-      base.py              # exchange adapter interfaces
-      forty_two.py         # HTTP / Playwright 42 adapter boundary
-      mock.py              # deterministic demo adapters
-      polymarket.py        # minimal CLOB HTTP market-data adapter
-    core/
-      arbitrage.py         # signal generation
-      pricing.py           # odds/probability/cost math
-      rules.py             # settlement and hedgeability checks
-    storage/logger.py      # SQLite + JSONL logs
-    config.py              # .env + config.json loader
-    execution.py           # paper/live gate, requote, unwind hook
-    main.py                # CLI runner
-    models.py
-    notifications.py
-  examples/france_senegal_demo.py
-  tests/test_pricing_and_rules.py
+Condition A: 42_team_win_cost + polymarket_team_no_cost < target_total_cost_threshold
+Condition B: 42_team_draw_cost + 42_team_lost_cost > polymarket_team_no_cost
+```
+
+The default threshold is `0.9`.
+
+If 42 exact score rules say `excludes ≥4 - ≥4`, the monitor can still alert, but it marks:
+
+```text
+rule_risk = true
+rule_risk_reason = "42 Team Win excludes ≥4-≥4, not fully equivalent to Polymarket Team Win"
+```
+
+That means the signal is not strict risk-free arbitrage; it is a partial-coverage price-dislocation alert.
+
+## Structure
+
+```text
+worldcup-arb-monitor/
+  README.md
+  requirements.txt
   .env.example
   config.example.json
-  requirements.txt
+  main.py
+  src/
+    config.py
+    models.py
+    polymarket_adapter.py
+    forty_two_adapter.py
+    team_normalizer.py
+    market_matcher.py
+    odds_calculator.py
+    arbitrage_detector.py
+    notifier.py
+    logger.py
+  data/
+    market_snapshots.jsonl
+    signals.jsonl
+    unmatched_markets.jsonl
+    errors.jsonl
+  tests/
+    test_odds_calculator.py
+    test_arbitrage_detector.py
+    test_team_normalizer.py
 ```
+
+The local folder is still named `forty_two_polymarket_arb`, but the code follows the PRD structure.
 
 ## Install
 
 ```bash
 cd /Users/zyssssss/Documents/Playground/forty_two_polymarket_arb
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-playwright install chromium
 ```
 
-## Configuration
-
-Copy the examples:
+## Configure
 
 ```bash
 cp .env.example .env
 cp config.example.json config.json
 ```
 
-Important config fields:
-
-- `min_profit_margin`: default `0.03`
-- `safety_margin`: default `0.05`
-- `max_position_per_market`
-- `max_total_exposure`
-- `max_slippage`
-- `min_liquidity`
-- `event_mappings[].forty_two_market_type`: `exact_score`, `yes_no`, or `other`
-- `event_mappings[].exact_score_mapping.target_scores`: all exact-score cells that belong to the target result
-- `event_mappings[].exact_score_mapping.is_complete_target_coverage`: must be true for live eligibility
-
-## Exact Score Rule
-
-Do not compare one exact score to a win/loss market.
-
-For a 42 exact-score market, the target result cost is:
+`.env`:
 
 ```text
-sum(1 / decimal_odds for every exact score belonging to the target result)
+POLYMARKET_API_BASE_URL=https://gamma-api.polymarket.com
+POLYMARKET_CLOB_BASE_URL=https://clob.polymarket.com
+FORTY_TWO_API_BASE_URL=https://rest.ft.42.space
+WEBHOOK_URL=
 ```
 
-If 42 Quick Select says `FRA wins the match excludes ≥4 - ≥4`, the market is marked `NOT_FULLY_HEDGEABLE` because results such as `5-4`, `6-4`, and `6-5` are France wins but sit inside the excluded high-score bucket.
+`config.json`:
 
-## Run Demo
-
-```bash
-PYTHONPATH=. python examples/france_senegal_demo.py
+```json
+{
+  "scan_interval_seconds": 60,
+  "target_total_cost_threshold": 0.9,
+  "markets": {
+    "sport": "soccer",
+    "competition": "World Cup"
+  },
+  "notifications": {
+    "console": true,
+    "webhook_url": ""
+  },
+  "risk_flags": {
+    "allow_partial_coverage_alert": true,
+    "flag_42_excludes_4_4": true
+  }
+}
 ```
 
-Demo assumptions:
+The example config defaults to live, read-only endpoints:
 
-- Polymarket France YES = `0.67`
-- Polymarket France NO = `0.33`
-- 42 France Win exact-score basket = `0.55`
-- total cost = `0.55 + 0.33 = 0.88`
-- theoretical locked profit = `0.12`
+- Polymarket Gamma: `https://gamma-api.polymarket.com`
+- Polymarket CLOB: `https://clob.polymarket.com`
+- 42 market REST API: `https://rest.ft.42.space`
 
-Expected action:
+42 exact-score API values are normalized as:
 
 ```text
-ARBITRAGE_BUY_42_AND_BUY_POLYMARKET_OPPOSITE
+decimal_odds = payout / price
+implied_probability = price / payout
 ```
 
-## Run Once
+The raw 42 `price` field must never be summed directly.
+The ambiguous `≥4–≥4` cell is excluded from Win/Draw/Lost totals and marks the
+market as partial coverage because it contains winning, drawing, and losing
+scorelines.
+
+## Run
+
+One scan:
 
 ```bash
-PYTHONPATH=. python -m arb_bot.main --config config.example.json --once
+PYTHONPATH=. python main.py --config config.example.json --once
 ```
 
-The runner logs:
+Verify live connectivity and report usable market counts:
 
-- `raw_market_snapshot`
-- `signal_log`
-- `order_log`
-- `position_log`
-- `error_log`
-- `pnl_log`
+```bash
+PYTHONPATH=. python main.py --config config.example.json --check-live
+```
 
-to both SQLite and JSONL.
+The check distinguishes API connectivity from market compatibility. It is valid
+for Polymarket to return zero compatible single-match Team Yes/No markets when
+only tournament-winner or group-winner markets are listed; those markets are
+intentionally rejected.
 
-## Live Trading Notes
+24-hour loop:
 
-Live trading is intentionally gated. It is only possible when:
+```bash
+PYTHONPATH=. python main.py --config config.json
+```
 
-1. `paper_trading=false`
-2. `auto_trade=true`
-3. both adapters implement audited limit-order placement
-4. both sides are requoted immediately before execution
-5. profit remains above `min_profit_margin`
-6. liquidity, slippage, position, fee, and redeem-tax checks pass
-7. the venue supports a credible simultaneous-fill workflow
+Stop with `Ctrl-C`.
 
-If one side fills and the other does not, `ExecutionEngine` calls `emergency_unwind()` on the 42 adapter. Production use should implement exchange-specific cancel, sell, redeem, and alert escalation there.
+## Alert Format
+
+```text
+【世界杯套利机会】
+
+比赛：France vs Senegal
+队伍：France
+42 Win 成本：0.55
+42 Draw 成本：0.20
+42 Lost 成本：0.25
+42 Draw + Lost 成本：0.45
+Polymarket Yes 成本：0.67
+Polymarket No 成本：0.33
+No 是否估算：否
+总成本 42 Win + Polymarket No：0.88
+理论空间：12%
+Polymarket No 相对 42 Draw+Lost 折价：12%
+Condition A 是否成立：是
+Condition B 是否成立：是
+是否存在规则风险：是
+规则风险原因：42 Team Win excludes ≥4-≥4, not fully equivalent to Polymarket Team Win
+时间：2026-06-17T03:00:00Z
+建议动作：ALERT_ARBITRAGE_OPPORTUNITY
+```
+
+## Logs
+
+All scans write JSONL files:
+
+- `data/market_snapshots.jsonl`
+- `data/signals.jsonl`
+- `data/unmatched_markets.jsonl`
+- `data/errors.jsonl`
+
+## Tests
+
+```bash
+PYTHONPATH=. pytest tests
+```
+
+The tests cover decimal odds conversion, Polymarket yes/no conversion, exact-score grouping, Condition A/B, alias matching, and `excludes ≥4-≥4` rule-risk tagging.

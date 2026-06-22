@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.env
+data/*.jsonl
+!data/.gitkeep
 arb_bot.sqlite3
 logs/
-.env
