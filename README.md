@@ -1,131 +1,100 @@
-# 42 + Polymarket Cross-Platform Hedge Arbitrage Bot
+# World Cup 42 + Polymarket Arbitrage Monitor
 
-Python implementation for monitoring the same sports/event exposure on 42 and Polymarket. It converts all odds into implied probability / buy cost, treats Polymarket as the liquid reference market, and looks for cases where a 42 target basket plus the Polymarket opposite side costs less than `1 - min_profit_margin`.
+只做世界杯预测市场套利监控和提醒，不做真实交易，不连接钱包，不保存私钥或 Cookie。
 
-Default mode is safe:
+## Core Logic
 
-- `paper_trading=true`
-- `auto_trade=false`
-- live order methods are adapter boundaries, not silently wired
-- if settlement rules differ, or 42 redeem tax is unavailable, the bot emits `ALERT_ONLY`
-
-## Directory Structure
+针对同一场世界杯比赛和同一目标队伍：
 
 ```text
-forty_two_polymarket_arb/
-  arb_bot/
-    adapters/
-      base.py              # exchange adapter interfaces
-      forty_two.py         # HTTP / Playwright 42 adapter boundary
-      mock.py              # deterministic demo adapters
-      polymarket.py        # minimal CLOB HTTP market-data adapter
-    core/
-      arbitrage.py         # signal generation
-      pricing.py           # odds/probability/cost math
-      rules.py             # settlement and hedgeability checks
-    storage/logger.py      # SQLite + JSONL logs
-    config.py              # .env + config.json loader
-    execution.py           # paper/live gate, requote, unwind hook
-    main.py                # CLI runner
-    models.py
-    notifications.py
-  examples/france_senegal_demo.py
-  tests/test_pricing_and_rules.py
-  .env.example
-  config.example.json
-  requirements.txt
+Condition A: 42_team_win_cost + polymarket_team_no_cost < 0.9
+Condition B: 42_team_draw_cost + 42_team_lost_cost > polymarket_team_no_cost
 ```
+
+只有 A 和 B 同时成立才输出 `ALERT_ARBITRAGE_OPPORTUNITY`。
+
+## APIs
+
+- Polymarket: `https://gamma-api.polymarket.com/events`
+- 42.space: `https://rest.ft.42.space/api/v1/markets/{address}`
+
+42 的 REST `price` 如果是 bonding-curve marginal price 且所有 outcome 价格总和不接近 1，会先归一化为 `price / sum(all_prices)`，再拆成 Win / Draw / Lost 成本，避免把 marginal price 直接当作 Polymarket 概率比较。
+
+## Structure
+
+```text
+main.py
+src/
+  config.py
+  models.py
+  polymarket_adapter.py
+  forty_two_adapter.py
+  team_normalizer.py
+  market_matcher.py
+  odds_calculator.py
+  arbitrage_detector.py
+  notifier.py
+  logger.py
+data/
+  market_snapshots.jsonl
+  signals.jsonl
+  unmatched_markets.jsonl
+  errors.jsonl
+tests/
+  test_worldcup_monitor.py
+```
+
+Legacy `arb_bot/` 代码仍保留，但新版监控入口是根目录 `main.py`。
 
 ## Install
 
-```bash
-cd /Users/zyssssss/Documents/Playground/forty_two_polymarket_arb
+```powershell
+cd C:\polymarket\forty-two-polymarket-arb
 python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium
+.venv\Scripts\pip.exe install -r requirements.txt
+copy .env.example .env
 ```
 
-## Configuration
+## Configure
 
-Copy the examples:
+编辑 `config.example.json` 或复制为自己的配置：
 
-```bash
-cp .env.example .env
-cp config.example.json config.json
+```powershell
+copy config.example.json config.local.json
 ```
 
-Important config fields:
+关键字段：
 
-- `min_profit_margin`: default `0.03`
-- `safety_margin`: default `0.05`
-- `max_position_per_market`
-- `max_total_exposure`
-- `max_slippage`
-- `min_liquidity`
-- `event_mappings[].forty_two_market_type`: `exact_score`, `yes_no`, or `other`
-- `event_mappings[].exact_score_mapping.target_scores`: all exact-score cells that belong to the target result
-- `event_mappings[].exact_score_mapping.is_complete_target_coverage`: must be true for live eligibility
-
-## Exact Score Rule
-
-Do not compare one exact score to a win/loss market.
-
-For a 42 exact-score market, the target result cost is:
-
-```text
-sum(1 / decimal_odds for every exact score belonging to the target result)
-```
-
-If 42 Quick Select says `FRA wins the match excludes ≥4 - ≥4`, the market is marked `NOT_FULLY_HEDGEABLE` because results such as `5-4`, `6-4`, and `6-5` are France wins but sit inside the excluded high-score bucket.
-
-## Run Demo
-
-```bash
-PYTHONPATH=. python examples/france_senegal_demo.py
-```
-
-Demo assumptions:
-
-- Polymarket France YES = `0.67`
-- Polymarket France NO = `0.33`
-- 42 France Win exact-score basket = `0.55`
-- total cost = `0.55 + 0.33 = 0.88`
-- theoretical locked profit = `0.12`
-
-Expected action:
-
-```text
-ARBITRAGE_BUY_42_AND_BUY_POLYMARKET_OPPOSITE
-```
+- `scan_interval_seconds`: 扫描间隔
+- `target_total_cost_threshold`: 默认 `0.9`
+- `polymarket_event_slugs`: 指定 Polymarket World Cup event slug
+- `forty_two_market_addresses`: 指定 42 market address
+- `notifications.webhook_url`: 可选 webhook
 
 ## Run Once
 
-```bash
-PYTHONPATH=. python -m arb_bot.main --config config.example.json --once
+```powershell
+$env:PYTHONPATH = "C:\polymarket\forty-two-polymarket-arb"
+.venv\Scripts\python.exe main.py --config config.example.json --once
 ```
 
-The runner logs:
+## Run 24/7
 
-- `raw_market_snapshot`
-- `signal_log`
-- `order_log`
-- `position_log`
-- `error_log`
-- `pnl_log`
+```powershell
+$env:PYTHONPATH = "C:\polymarket\forty-two-polymarket-arb"
+.venv\Scripts\python.exe main.py --config config.example.json
+```
 
-to both SQLite and JSONL.
+## Logs
 
-## Live Trading Notes
+- `data/market_snapshots.jsonl`: 每次扫描原始标准化盘口
+- `data/signals.jsonl`: 套利提醒
+- `data/unmatched_markets.jsonl`: 无法匹配的市场
+- `data/errors.jsonl`: API 错误、解析错误、超时
 
-Live trading is intentionally gated. It is only possible when:
+## Tests
 
-1. `paper_trading=false`
-2. `auto_trade=true`
-3. both adapters implement audited limit-order placement
-4. both sides are requoted immediately before execution
-5. profit remains above `min_profit_margin`
-6. liquidity, slippage, position, fee, and redeem-tax checks pass
-7. the venue supports a credible simultaneous-fill workflow
-
-If one side fills and the other does not, `ExecutionEngine` calls `emergency_unwind()` on the 42 adapter. Production use should implement exchange-specific cancel, sell, redeem, and alert escalation there.
+```powershell
+$env:PYTHONPATH = "C:\polymarket\forty-two-polymarket-arb"
+.venv\Scripts\python.exe -m pytest tests -v
+```

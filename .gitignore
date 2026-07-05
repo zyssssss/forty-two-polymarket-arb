@@ -5,3 +5,6 @@ __pycache__/
 arb_bot.sqlite3
 logs/
 .env
+config.json
+config.prt_cdr.json
+data/
